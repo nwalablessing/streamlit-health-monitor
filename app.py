@@ -88,16 +88,38 @@ def authenticate_user(username, password):
     return users.get(username) == hashed_password
 
 
+PATIENT_DB = "patient_data.json"
+
 def save_patient_data(patient_id, patient_name, chat_id):
     """Save registered patient details including Telegram Chat ID."""
-    with open(PATIENT_DB, "r") as f:
-        patients = json.load(f)
-    
-    patients[patient_id] = {"name": patient_name, "chat_id": chat_id}
-    
-    with open(PATIENT_DB, "w") as f:
-        json.dump(patients, f)
 
+    # ✅ Ensure the file exists and is not empty
+    if not os.path.exists(PATIENT_DB):
+        with open(PATIENT_DB, "w") as f:
+            json.dump({}, f)
+
+    try:
+        # ✅ Read existing patient data safely
+        with open(PATIENT_DB, "r") as f:
+            try:
+                patients = json.load(f)
+                if not isinstance(patients, dict):
+                    patients = {}  # Reset if not a dictionary
+            except json.JSONDecodeError:
+                patients = {}  # Reset if file is corrupt
+        
+        # ✅ Update the patient info
+        patients[patient_id] = {"name": patient_name, "chat_id": chat_id}
+
+        # ✅ Write back to the file safely
+        with open(PATIENT_DB, "w") as f:
+            json.dump(patients, f, indent=4)
+
+        print(f"✅ Patient {patient_name} (ID: {patient_id}) registered successfully!")
+
+    except OSError as e:
+        print(f"❌ Error saving patient data: {e}")
+        
 def get_patient_chat_id(patient_id):
     """Retrieve the Telegram Chat ID for a patient."""
     with open(PATIENT_DB, "r") as f:
@@ -253,15 +275,17 @@ def main_interface():
 def patient_registration_interface():
     """Patient Registration Section."""
     st.subheader("Patient Registration")
+
     patient_id = st.text_input("Enter Patient ID")
     patient_name = st.text_input("Enter Patient Name")
+    chat_id = st.text_input("Enter Patient's Telegram Chat ID")  # ✅ Added this line
 
     if st.button("Register Patient"):
-        if patient_id and patient_name:
-            save_patient_data(patient_id, patient_name)
+        if patient_id and patient_name and chat_id:  # ✅ Ensure all fields are filled
+            save_patient_data(patient_id, patient_name, chat_id)  # ✅ Now passing chat_id
             st.success(f"Patient {patient_name} with ID {patient_id} has been registered.")
         else:
-            st.error("Please provide both Patient ID and Patient Name.")
+            st.error("⚠️ Please provide Patient ID, Name, and Chat ID.")
 
 
 def manual_prediction_interface():
