@@ -1,10 +1,11 @@
 import os
 import requests
+import streamlit as st  # ✅ Use Streamlit Secrets (recommended)
 
-
-CLIENT_ID = os.getenv("CLIENT_ID")
-CLIENT_SECRET = os.getenv("CLIENT_SECRET")
-REFRESH_TOKEN = os.getenv("REFRESH_TOKEN")
+# ✅ Use Streamlit Secrets if available, otherwise fallback to environment variables
+CLIENT_ID = st.secrets["CLIENT_ID"] if "CLIENT_ID" in st.secrets else os.getenv("CLIENT_ID")
+CLIENT_SECRET = st.secrets["CLIENT_SECRET"] if "CLIENT_SECRET" in st.secrets else os.getenv("CLIENT_SECRET")
+REFRESH_TOKEN = st.secrets["REFRESH_TOKEN"] if "REFRESH_TOKEN" in st.secrets else os.getenv("REFRESH_TOKEN")
 
 def refresh_access_token():
     """Refresh Strava access token if expired."""
@@ -24,13 +25,6 @@ def refresh_access_token():
         new_refresh_token = data.get("refresh_token")
 
         if new_access_token:
-            # Update .env file with new tokens
-            with open(".env", "w") as env_file:
-                env_file.write(f"CLIENT_ID={CLIENT_ID}\n")
-                env_file.write(f"CLIENT_SECRET={CLIENT_SECRET}\n")
-                env_file.write(f"ACCESS_TOKEN={new_access_token}\n")
-                env_file.write(f"REFRESH_TOKEN={new_refresh_token}\n")
-
             print("✅ Strava token refreshed successfully!")
             return new_access_token
         else:
