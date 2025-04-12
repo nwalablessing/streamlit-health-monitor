@@ -10,6 +10,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 import requests
+import xml.etree.ElementTree as ET
 from strava_api import fetch_activities
 
 # Load environment variables correctly from Streamlit Cloud Secrets
@@ -319,84 +320,117 @@ def manual_prediction_interface():
             st.write(f"Prediction: **{outcome}**")
         except ValueError as e:
             st.error(f"Prediction failed: {e}")
+            
+def parse_health_data(xml_file):
+    """Parse Apple Health export.xml for Heart Rate, SpO2, and Body Mass."""
+    tree = ET.parse(xml_file)
+    root = tree.getroot()
+
+    records = []
+    for record in root.findall("Record"):
+        rtype = record.attrib.get("type")
+        if rtype in [
+            "HKQuantityTypeIdentifierHeartRate",
+            "HKQuantityTypeIdentifierOxygenSaturation",
+            "HKQuantityTypeIdentifierBodyMass"
+        ]:
+            records.append({
+                "type": rtype.split("Identifier")[-1],
+                "value": float(record.attrib.get("value", 0)),
+                "unit": record.attrib.get("unit"),
+                "start_date": record.attrib.get("startDate"),
+            })
+
+    df = pd.DataFrame(records)
+    df["start_date"] = pd.to_datetime(df["start_date"])
+    df["value"] = pd.to_numeric(df["value"], errors="coerce")
+    return df
 
 def real_time_monitoring_interface():
-    """Real-Time Patient Monitoring with Strava Data & Vitals."""
+    """Real-Time Patient Monitoring using both Strava + Apple Health."""
     st.subheader("📡 Real-Time Patient Monitoring")
+
     patient_id = st.text_input("Enter Patient ID to Monitor")
 
-    if st.button("Start Monitoring"):
-        if is_patient_registered(patient_id):
-            st.write("✅ Fetching latest activities...")
+    if not is_patient_registered(patient_id):
+        st.warning("⚠️ Patient not registered. Please register first.")
+        return
 
-            activities = fetch_activities()
+    # --- STRAVA DATA ---
+    st.markdown("## 🚴 Strava Activity Data")
 
-            if activities and len(activities) > 0:
-                df = pd.DataFrame(activities)
+    if st.button("Fetch Strava Activities"):
+        st.write("🔄 Fetching activities from Strava...")
 
-                # ✅ Ensure required columns exist before processing
-                relevant_columns = ["name", "type", "distance", "moving_time", "average_speed", "start_date_local", "average_heartrate"]
-                df = df[[col for col in relevant_columns if col in df.columns]]
-                df["start_date_local"] = pd.to_datetime(df["start_date_local"])
+        activities = fetch_activities()
+        if activities and len(activities) > 0:
+            df = pd.DataFrame(activities)
+            relevant_columns = ["name", "type", "distance", "moving_time", "average_speed", "start_date_local", "average_heartrate"]
+            df = df[[col for col in relevant_columns if col in df.columns]]
+            df["start_date_local"] = pd.to_datetime(df["start_date_local"])
+            st.dataframe(df)
 
-                if df.empty:
-                    st.warning("⚠ No activity data found.")
-                    return
+            st.write("### 📈 Distance Over Time")
+            fig1, ax1 = plt.subplots()
+            ax1.plot(df["start_date_local"], df["distance"], marker="o", linestyle="-", color="blue")
+            ax1.set_title("Distance Over Time")
+            ax1.set_xlabel("Date")
+            ax1.set_ylabel("Meters")
+            ax1.xaxis.set_major_formatter(mdates.DateFormatter("%Y-%m-%d"))
+            fig1.autofmt_xdate()
+            st.pyplot(fig1)
 
-                # 📌 **Display Data Table**
-                st.write("### Recent Activities")
-                st.dataframe(df)
+            st.write("### ⚡ Speed Over Time")
+            fig2, ax2 = plt.subplots()
+            ax2.plot(df["start_date_local"], df["average_speed"], marker="o", linestyle="-", color="red")
+            ax2.set_title("Speed Over Time")
+            ax2.set_xlabel("Date")
+            ax2.set_ylabel("m/s")
+            ax2.xaxis.set_major_formatter(mdates.DateFormatter("%Y-%m-%d"))
+            fig2.autofmt_xdate()
+            st.pyplot(fig2)
 
-                # 📊 **Distance Over Time**
-                st.write("### 📈 Distance Over Time")
-                fig, ax = plt.subplots()
-                ax.plot(df["start_date_local"], df["distance"], marker="o", linestyle="-", color="b")
-                ax.set_xlabel("Date")
-                ax.set_ylabel("Distance (meters)")
-                ax.set_title("Distance Over Time")
+            if "average_heartrate" in df.columns and df["average_heartrate"].notnull().any():
+                st.write("### ❤️ Heart Rate Over Time")
+                fig3, ax3 = plt.subplots()
+                ax3.plot(df["start_date_local"], df["average_heartrate"], marker="o", linestyle="-", color="green")
+                ax3.set_title("Heart Rate from Strava")
+                ax3.set_ylabel("bpm")
+                ax3.set_xlabel("Date")
+                ax3.xaxis.set_major_formatter(mdates.DateFormatter("%Y-%m-%d"))
+                fig3.autofmt_xdate()
+                st.pyplot(fig3)
+        else:
+            st.error("❌ No activity data retrieved from Strava.")
 
-                # ✅ Fix date formatting
-                ax.xaxis.set_major_formatter(mdates.DateFormatter("%Y-%m-%d"))
-                ax.xaxis.set_major_locator(mdates.AutoDateLocator())
-                fig.autofmt_xdate(rotation=45)
+    # --- APPLE HEALTH DATA ---
+    st.markdown("## 🍎 Apple Health Export Data")
+    uploaded_file = st.file_uploader("Upload `export.xml` from Apple Health", type="xml")
 
-                st.pyplot(fig)
+    if uploaded_file is not None:
+        try:
+            st.success("✅ Apple Health file received. Parsing...")
+            df_health = parse_health_data(uploaded_file)
 
-                # 📊 **Speed Over Time**
-                st.write("### ⚡ Speed Over Time")
-                fig, ax = plt.subplots()
-                ax.plot(df["start_date_local"], df["average_speed"], marker="o", linestyle="-", color="r")
-                ax.set_xlabel("Date")
-                ax.set_ylabel("Speed (m/s)")
-                ax.set_title("Speed Over Time")
+            st.write("### 📋 Apple Health Records")
+            st.dataframe(df_health.sort_values("start_date", ascending=False))
 
-                # ✅ Fix date formatting
-                ax.xaxis.set_major_formatter(mdates.DateFormatter("%Y-%m-%d"))
-                ax.xaxis.set_major_locator(mdates.AutoDateLocator())
-                fig.autofmt_xdate(rotation=45)
-
-                st.pyplot(fig)
-
-                # 📊 **Heart Rate Over Time (if available)**
-                if "average_heartrate" in df.columns:
-                    st.write("### ❤️ Heart Rate Over Time")
+            for metric in df_health["type"].unique():
+                metric_df = df_health[df_health["type"] == metric]
+                if not metric_df.empty:
+                    st.write(f"### 📈 {metric} Over Time")
                     fig, ax = plt.subplots()
-                    ax.plot(df["start_date_local"], df["average_heartrate"], marker="o", linestyle="-", color="g")
+                    ax.plot(metric_df["start_date"], metric_df["value"], marker="o", linestyle="-")
+                    ax.set_title(f"{metric} Trends")
                     ax.set_xlabel("Date")
-                    ax.set_ylabel("Heart Rate (bpm)")
-                    ax.set_title("Heart Rate Over Time")
-
-                    # ✅ Fix date formatting
+                    ax.set_ylabel(f"{metric_df['unit'].iloc[0]}")
                     ax.xaxis.set_major_formatter(mdates.DateFormatter("%Y-%m-%d"))
-                    ax.xaxis.set_major_locator(mdates.AutoDateLocator())
-                    fig.autofmt_xdate(rotation=45)
-
+                    fig.autofmt_xdate()
                     st.pyplot(fig)
 
-            else:
-                st.error("⚠️ No activity data retrieved from Strava.")
-        else:
-            st.error("⚠️ Patient not registered. Please register first.")
+        except Exception as e:
+            st.error(f"❌ Failed to parse XML file: {e}")
+
 
 
 def Medication_reminders_interface():
