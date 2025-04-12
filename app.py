@@ -10,6 +10,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 import requests
+import re 
 import xml.etree.ElementTree as ET
 from strava_api import fetch_activities
 
@@ -198,6 +199,18 @@ def get_strava_activities():
 
 
 # App Pages
+def is_strong_password(password):
+    """Check for password strength."""
+    if len(password) < 8:
+        return False
+    if not re.search(r"[A-Z]", password):
+        return False
+    if not re.search(r"[a-z]", password):
+        return False
+    if not re.search(r"[^A-Za-z0-9]", password):  # Special char
+        return False
+    return True
+
 def register_page():
     """User Registration Page."""
     st.markdown("<h1 style='text-align: center; color: white; background-color: orange;'>NUB Sepsis Software Registration</h1>", unsafe_allow_html=True)
@@ -208,14 +221,16 @@ def register_page():
 
     if st.button("Register"):
         if password != confirm_password:
-            st.error("Passwords do not match.")
+            st.error("❌ Passwords do not match.")
+        elif not is_strong_password(password):
+            st.warning("❗ Password must be at least 8 characters long and include:\n- One uppercase letter\n- One lowercase letter\n- One special character")
         elif username in st.session_state["users"]:
-            st.error("Username already exists. Please choose another.")
+            st.error("❌ Username already exists. Please choose another.")
         else:
             hashed_password = hash_password(password)
             save_user_data(username, hashed_password)
             st.session_state["users"][username] = hashed_password
-            st.success("Registration successful! You can now log in.")
+            st.success("✅ Registration successful! You can now log in.")
 
 
 def login_page():
