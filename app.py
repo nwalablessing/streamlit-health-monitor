@@ -428,19 +428,19 @@ def real_time_monitoring_interface():
             st.error("❌ No activity data retrieved from Strava.")
 
     # ==========================
-    # 🍎 APPLE HEALTH JSON ONLY
+    # 🍎 APPLE HEALTH JSON (from UNIX timestamps)
     # ==========================
     st.markdown("## 🍎 Apple Health Data")
-    st.markdown("✅ Using JSON data source")
+    st.markdown("✅ JSON data with UNIX timestamp format")
 
     df_health = pd.DataFrame()
 
     try:
         df_health = pd.read_json("apple_health.json")
 
-        # ✅ Parse datetime with timezone correctly, coerce bad values
-        df_health["start_date"] = pd.to_datetime(df_health["start_date"], errors="coerce", utc=True)
-        df_health = df_health[df_health["start_date"].notnull()]  # ✅ Remove invalid dates
+        # ✅ Convert Unix timestamp in milliseconds to datetime
+        df_health["start_date"] = pd.to_datetime(df_health["start_date"], unit="ms", utc=True)
+        df_health = df_health[df_health["start_date"].notnull()]
 
         df_health["value"] = pd.to_numeric(df_health["value"], errors="coerce")
 
@@ -460,9 +460,9 @@ def real_time_monitoring_interface():
                 ax.xaxis.set_major_formatter(mdates.DateFormatter("%Y-%m-%d"))
                 fig.autofmt_xdate()
                 st.pyplot(fig)
+
     except Exception as e:
         st.error(f"❌ Error loading Apple Health data: {e}")
-
 
 
 def Medication_reminders_interface():
