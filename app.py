@@ -430,39 +430,38 @@ def real_time_monitoring_interface():
     # ==========================
     # 🍎 APPLE HEALTH CSV/JSON
     # ==========================
-    st.markdown("## 🍎 Apple Health Data")
+    # ==========================
+# 🍎 APPLE HEALTH JSON ONLY
+# ==========================
+st.markdown("## 🍎 Apple Health Data")
+st.markdown("✅ Using JSON data source")
 
-    format_choice = st.radio("Select Health Data Source", ["CSV", "JSON"])
+df_health = pd.DataFrame()
 
-    df_health = pd.DataFrame()
+try:
+    df_health = pd.read_json("apple_health.json")
 
-    try:
-        if format_choice == "CSV":
-            df_health = pd.read_csv("apple_health.csv")
-        elif format_choice == "JSON":
-            df_health = pd.read_json("apple_health.json")
+    df_health["start_date"] = pd.to_datetime(df_health["start_date"])
+    df_health["value"] = pd.to_numeric(df_health["value"], errors="coerce")
 
-        df_health["start_date"] = pd.to_datetime(df_health["start_date"])
-        df_health["value"] = pd.to_numeric(df_health["value"], errors="coerce")
+    st.success("✅ Apple Health data loaded.")
+    st.write("### 🧾 Apple Health Records")
+    st.dataframe(df_health.sort_values("start_date", ascending=False))
 
-        st.success("✅ Apple Health data loaded.")
-        st.write("### 🧾 Apple Health Records")
-        st.dataframe(df_health.sort_values("start_date", ascending=False))
-
-        for metric in df_health["type"].unique():
-            metric_df = df_health[df_health["type"] == metric]
-            if not metric_df.empty:
-                st.write(f"### 📈 {metric} Over Time")
-                fig, ax = plt.subplots()
-                ax.plot(metric_df["start_date"], metric_df["value"], marker="o", linestyle="-")
-                ax.set_title(f"{metric} Trends")
-                ax.set_ylabel(metric_df['unit'].iloc[0])
-                ax.set_xlabel("Date")
-                ax.xaxis.set_major_formatter(mdates.DateFormatter("%Y-%m-%d"))
-                fig.autofmt_xdate()
-                st.pyplot(fig)
-    except Exception as e:
-        st.error(f"❌ Error loading Apple Health data: {e}")
+    for metric in df_health["type"].unique():
+        metric_df = df_health[df_health["type"] == metric]
+        if not metric_df.empty:
+            st.write(f"### 📈 {metric} Over Time")
+            fig, ax = plt.subplots()
+            ax.plot(metric_df["start_date"], metric_df["value"], marker="o", linestyle="-")
+            ax.set_title(f"{metric} Trends")
+            ax.set_ylabel(metric_df['unit'].iloc[0])
+            ax.set_xlabel("Date")
+            ax.xaxis.set_major_formatter(mdates.DateFormatter("%Y-%m-%d"))
+            fig.autofmt_xdate()
+            st.pyplot(fig)
+except Exception as e:
+    st.error(f"❌ Error loading Apple Health data: {e}")
 
 
 def Medication_reminders_interface():
