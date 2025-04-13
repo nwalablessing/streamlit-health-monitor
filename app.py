@@ -10,6 +10,8 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 import requests
+import re 
+import xml.etree.ElementTree as ET
 from strava_api import fetch_activities
 
 # Load environment variables correctly from Streamlit Cloud Secrets
@@ -88,16 +90,38 @@ def authenticate_user(username, password):
     return users.get(username) == hashed_password
 
 
+PATIENT_DB = "patient_data.json"
+
 def save_patient_data(patient_id, patient_name, chat_id):
     """Save registered patient details including Telegram Chat ID."""
-    with open(PATIENT_DB, "r") as f:
-        patients = json.load(f)
-    
-    patients[patient_id] = {"name": patient_name, "chat_id": chat_id}
-    
-    with open(PATIENT_DB, "w") as f:
-        json.dump(patients, f)
 
+    # ✅ Ensure the file exists and is not empty
+    if not os.path.exists(PATIENT_DB):
+        with open(PATIENT_DB, "w") as f:
+            json.dump({}, f)
+
+    try:
+        # ✅ Read existing patient data safely
+        with open(PATIENT_DB, "r") as f:
+            try:
+                patients = json.load(f)
+                if not isinstance(patients, dict):
+                    patients = {}  # Reset if not a dictionary
+            except json.JSONDecodeError:
+                patients = {}  # Reset if file is corrupt
+        
+        # ✅ Update the patient info
+        patients[patient_id] = {"name": patient_name, "chat_id": chat_id}
+
+        # ✅ Write back to the file safely
+        with open(PATIENT_DB, "w") as f:
+            json.dump(patients, f, indent=4)
+
+        print(f"✅ Patient {patient_name} (ID: {patient_id}) registered successfully!")
+
+    except OSError as e:
+        print(f"❌ Error saving patient data: {e}")
+        
 def get_patient_chat_id(patient_id):
     """Retrieve the Telegram Chat ID for a patient."""
     with open(PATIENT_DB, "r") as f:
@@ -175,6 +199,18 @@ def get_strava_activities():
 
 
 # App Pages
+def is_strong_password(password):
+    """Check for password strength."""
+    if len(password) < 8:
+        return False
+    if not re.search(r"[A-Z]", password):
+        return False
+    if not re.search(r"[a-z]", password):
+        return False
+    if not re.search(r"[^A-Za-z0-9]", password):  # Special char
+        return False
+    return True
+
 def register_page():
     """User Registration Page."""
     st.markdown("<h1 style='text-align: center; color: white; background-color: orange;'>NUB Sepsis Software Registration</h1>", unsafe_allow_html=True)
@@ -185,14 +221,16 @@ def register_page():
 
     if st.button("Register"):
         if password != confirm_password:
-            st.error("Passwords do not match.")
+            st.error("❌ Passwords do not match.")
+        elif not is_strong_password(password):
+            st.warning("❗ Password must be at least 8 characters long and include:\n- One uppercase letter\n- One lowercase letter\n- One special character")
         elif username in st.session_state["users"]:
-            st.error("Username already exists. Please choose another.")
+            st.error("❌ Username already exists. Please choose another.")
         else:
             hashed_password = hash_password(password)
             save_user_data(username, hashed_password)
             st.session_state["users"][username] = hashed_password
-            st.success("Registration successful! You can now log in.")
+            st.success("✅ Registration successful! You can now log in.")
 
 
 def login_page():
@@ -253,15 +291,17 @@ def main_interface():
 def patient_registration_interface():
     """Patient Registration Section."""
     st.subheader("Patient Registration")
+
     patient_id = st.text_input("Enter Patient ID")
     patient_name = st.text_input("Enter Patient Name")
+    chat_id = st.text_input("Enter Patient's Telegram Chat ID")  # ✅ Added this line
 
     if st.button("Register Patient"):
-        if patient_id and patient_name:
-            save_patient_data(patient_id, patient_name)
+        if patient_id and patient_name and chat_id:  # ✅ Ensure all fields are filled
+            save_patient_data(patient_id, patient_name, chat_id)  # ✅ Now passing chat_id
             st.success(f"Patient {patient_name} with ID {patient_id} has been registered.")
         else:
-            st.error("Please provide both Patient ID and Patient Name.")
+            st.error("⚠️ Please provide Patient ID, Name, and Chat ID.")
 
 
 def manual_prediction_interface():
@@ -295,84 +335,140 @@ def manual_prediction_interface():
             st.write(f"Prediction: **{outcome}**")
         except ValueError as e:
             st.error(f"Prediction failed: {e}")
+            
+def parse_health_data(xml_file):
+    """Parse export.xml and extract HeartRate, SpO2, BodyMass."""
+    tree = ET.parse(xml_file)
+    root = tree.getroot()
+    records = []
+
+    for record in root.findall("Record"):
+        rtype = record.attrib.get("type")
+        if rtype in [
+            "HKQuantityTypeIdentifierHeartRate",
+            "HKQuantityTypeIdentifierOxygenSaturation",
+            "HKQuantityTypeIdentifierBodyMass"
+        ]:
+            records.append({
+                "type": rtype.split("Identifier")[-1],  # Just get "HeartRate"
+                "value": float(record.attrib.get("value", 0)),
+                "unit": record.attrib.get("unit"),
+                "start_date": record.attrib.get("startDate"),
+            })
+
+    df = pd.DataFrame(records)
+    df["start_date"] = pd.to_datetime(df["start_date"])
+    df["value"] = pd.to_numeric(df["value"], errors="coerce")
+    return df
+
+# Run this only once to convert XML to CSV and JSON
+if __name__ == "__main__":
+    df = parse_health_data("export.xml")  # ✅ Put your Apple Health export here
+    df.to_csv("apple_health.csv", index=False)
+    df.to_json("apple_health.json", orient="records", indent=2)
+    print("✅ export.xml converted to apple_health.csv and apple_health.json")
 
 def real_time_monitoring_interface():
-    """Real-Time Patient Monitoring with Strava Data & Vitals."""
+    """Real-Time Patient Monitoring using Strava + Apple Health data."""
     st.subheader("📡 Real-Time Patient Monitoring")
+
     patient_id = st.text_input("Enter Patient ID to Monitor")
 
-    if st.button("Start Monitoring"):
-        if is_patient_registered(patient_id):
-            st.write("✅ Fetching latest activities...")
+    if not is_patient_registered(patient_id):
+        st.warning("⚠️ Patient not registered. Please register first.")
+        return
 
-            activities = fetch_activities()
+    # ========================
+    # 🚴 STRAVA: Real-Time Data
+    # ========================
+    st.markdown("## 🚴 Strava Activity Data")
 
-            if activities and len(activities) > 0:
-                df = pd.DataFrame(activities)
+    if st.button("Fetch Strava Activities"):
+        st.info("🔄 Fetching from Strava...")
 
-                # ✅ Ensure required columns exist before processing
-                relevant_columns = ["name", "type", "distance", "moving_time", "average_speed", "start_date_local", "average_heartrate"]
-                df = df[[col for col in relevant_columns if col in df.columns]]
-                df["start_date_local"] = pd.to_datetime(df["start_date_local"])
+        activities = fetch_activities()
+        if activities and len(activities) > 0:
+            df_strava = pd.DataFrame(activities)
 
-                if df.empty:
-                    st.warning("⚠ No activity data found.")
-                    return
+            columns = ["name", "type", "distance", "moving_time", "average_speed", "start_date_local", "average_heartrate"]
+            df_strava = df_strava[[col for col in columns if col in df_strava.columns]]
+            df_strava["start_date_local"] = pd.to_datetime(df_strava["start_date_local"])
 
-                # 📌 **Display Data Table**
-                st.write("### Recent Activities")
-                st.dataframe(df)
+            st.success("✅ Strava data loaded")
+            st.dataframe(df_strava)
 
-                # 📊 **Distance Over Time**
-                st.write("### 📈 Distance Over Time")
+            # Distance plot
+            st.write("### 📈 Distance Over Time")
+            fig, ax = plt.subplots()
+            ax.plot(df_strava["start_date_local"], df_strava["distance"], marker="o", color="blue")
+            ax.set_xlabel("Date")
+            ax.set_ylabel("Meters")
+            ax.set_title("Distance Over Time")
+            ax.xaxis.set_major_formatter(mdates.DateFormatter("%Y-%m-%d"))
+            fig.autofmt_xdate()
+            st.pyplot(fig)
+
+            # Speed plot
+            st.write("### ⚡ Speed Over Time")
+            fig, ax = plt.subplots()
+            ax.plot(df_strava["start_date_local"], df_strava["average_speed"], marker="o", color="red")
+            ax.set_xlabel("Date")
+            ax.set_ylabel("m/s")
+            ax.set_title("Speed Over Time")
+            ax.xaxis.set_major_formatter(mdates.DateFormatter("%Y-%m-%d"))
+            fig.autofmt_xdate()
+            st.pyplot(fig)
+
+            # Heart Rate
+            if "average_heartrate" in df_strava.columns and df_strava["average_heartrate"].notnull().any():
+                st.write("### ❤️ Heart Rate from Strava")
                 fig, ax = plt.subplots()
-                ax.plot(df["start_date_local"], df["distance"], marker="o", linestyle="-", color="b")
+                ax.plot(df_strava["start_date_local"], df_strava["average_heartrate"], marker="o", color="green")
+                ax.set_title("Heart Rate from Strava")
+                ax.set_ylabel("bpm")
                 ax.set_xlabel("Date")
-                ax.set_ylabel("Distance (meters)")
-                ax.set_title("Distance Over Time")
-
-                # ✅ Fix date formatting
                 ax.xaxis.set_major_formatter(mdates.DateFormatter("%Y-%m-%d"))
-                ax.xaxis.set_major_locator(mdates.AutoDateLocator())
-                fig.autofmt_xdate(rotation=45)
-
+                fig.autofmt_xdate()
                 st.pyplot(fig)
-
-                # 📊 **Speed Over Time**
-                st.write("### ⚡ Speed Over Time")
-                fig, ax = plt.subplots()
-                ax.plot(df["start_date_local"], df["average_speed"], marker="o", linestyle="-", color="r")
-                ax.set_xlabel("Date")
-                ax.set_ylabel("Speed (m/s)")
-                ax.set_title("Speed Over Time")
-
-                # ✅ Fix date formatting
-                ax.xaxis.set_major_formatter(mdates.DateFormatter("%Y-%m-%d"))
-                ax.xaxis.set_major_locator(mdates.AutoDateLocator())
-                fig.autofmt_xdate(rotation=45)
-
-                st.pyplot(fig)
-
-                # 📊 **Heart Rate Over Time (if available)**
-                if "average_heartrate" in df.columns:
-                    st.write("### ❤️ Heart Rate Over Time")
-                    fig, ax = plt.subplots()
-                    ax.plot(df["start_date_local"], df["average_heartrate"], marker="o", linestyle="-", color="g")
-                    ax.set_xlabel("Date")
-                    ax.set_ylabel("Heart Rate (bpm)")
-                    ax.set_title("Heart Rate Over Time")
-
-                    # ✅ Fix date formatting
-                    ax.xaxis.set_major_formatter(mdates.DateFormatter("%Y-%m-%d"))
-                    ax.xaxis.set_major_locator(mdates.AutoDateLocator())
-                    fig.autofmt_xdate(rotation=45)
-
-                    st.pyplot(fig)
-
-            else:
-                st.error("⚠️ No activity data retrieved from Strava.")
         else:
-            st.error("⚠️ Patient not registered. Please register first.")
+            st.error("❌ No activity data retrieved from Strava.")
+
+    # ==========================
+    # 🍎 APPLE HEALTH CSV/JSON
+    # ==========================
+    st.markdown("## 🍎 Apple Health Data")
+
+    format_choice = st.radio("Select Health Data Source", ["CSV", "JSON"])
+
+    df_health = pd.DataFrame()
+
+    try:
+        if format_choice == "CSV":
+            df_health = pd.read_csv("apple_health.csv")
+        elif format_choice == "JSON":
+            df_health = pd.read_json("apple_health.json")
+
+        df_health["start_date"] = pd.to_datetime(df_health["start_date"])
+        df_health["value"] = pd.to_numeric(df_health["value"], errors="coerce")
+
+        st.success("✅ Apple Health data loaded.")
+        st.write("### 🧾 Apple Health Records")
+        st.dataframe(df_health.sort_values("start_date", ascending=False))
+
+        for metric in df_health["type"].unique():
+            metric_df = df_health[df_health["type"] == metric]
+            if not metric_df.empty:
+                st.write(f"### 📈 {metric} Over Time")
+                fig, ax = plt.subplots()
+                ax.plot(metric_df["start_date"], metric_df["value"], marker="o", linestyle="-")
+                ax.set_title(f"{metric} Trends")
+                ax.set_ylabel(metric_df['unit'].iloc[0])
+                ax.set_xlabel("Date")
+                ax.xaxis.set_major_formatter(mdates.DateFormatter("%Y-%m-%d"))
+                fig.autofmt_xdate()
+                st.pyplot(fig)
+    except Exception as e:
+        st.error(f"❌ Error loading Apple Health data: {e}")
 
 
 def Medication_reminders_interface():
