@@ -361,12 +361,6 @@ def parse_health_data(xml_file):
     df["value"] = pd.to_numeric(df["value"], errors="coerce")
     return df
 
-# Run this only once to convert XML to CSV and JSON
-if __name__ == "__main__":
-    df = parse_health_data("export.xml")  # ✅ Put your Apple Health export here
-    df.to_csv("apple_health.csv", index=False)
-    df.to_json("apple_health.json", orient="records", indent=2)
-    print("✅ export.xml converted to apple_health.csv and apple_health.json")
 
 def real_time_monitoring_interface():
     """Real-Time Patient Monitoring using Strava + Apple Health data."""
