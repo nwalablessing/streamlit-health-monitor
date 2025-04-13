@@ -438,7 +438,10 @@ def real_time_monitoring_interface():
     try:
         df_health = pd.read_json("apple_health.json")
 
-        df_health["start_date"] = pd.to_datetime(df_health["start_date"])
+        # ✅ Parse datetime with timezone correctly, coerce bad values
+        df_health["start_date"] = pd.to_datetime(df_health["start_date"], errors="coerce", utc=True)
+        df_health = df_health[df_health["start_date"].notnull()]  # ✅ Remove invalid dates
+
         df_health["value"] = pd.to_numeric(df_health["value"], errors="coerce")
 
         st.success("✅ Apple Health data loaded.")
@@ -459,6 +462,7 @@ def real_time_monitoring_interface():
                 st.pyplot(fig)
     except Exception as e:
         st.error(f"❌ Error loading Apple Health data: {e}")
+
 
 
 def Medication_reminders_interface():
