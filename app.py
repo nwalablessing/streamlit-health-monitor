@@ -393,55 +393,54 @@ def real_time_monitoring_interface():
 
             # Distance plot
             st.write("### 📈 Distance Over Time")
-            fig, ax = plt.subplots()
+            fig, ax = plt.subplots(figsize=(10, 4))
             ax.plot(df_strava["start_date_local"], df_strava["distance"], marker="o", color="blue")
             ax.set_xlabel("Date")
             ax.set_ylabel("Meters")
             ax.set_title("Distance Over Time")
-            ax.xaxis.set_major_formatter(mdates.DateFormatter("%Y-%m-%d"))
+            ax.xaxis.set_major_formatter(mdates.DateFormatter("%b %d"))
             fig.autofmt_xdate()
             st.pyplot(fig)
 
             # Speed plot
             st.write("### ⚡ Speed Over Time")
-            fig, ax = plt.subplots()
+            fig, ax = plt.subplots(figsize=(10, 4))
             ax.plot(df_strava["start_date_local"], df_strava["average_speed"], marker="o", color="red")
             ax.set_xlabel("Date")
             ax.set_ylabel("m/s")
             ax.set_title("Speed Over Time")
-            ax.xaxis.set_major_formatter(mdates.DateFormatter("%Y-%m-%d"))
+            ax.xaxis.set_major_formatter(mdates.DateFormatter("%b %d"))
             fig.autofmt_xdate()
             st.pyplot(fig)
 
             # Heart Rate
             if "average_heartrate" in df_strava.columns and df_strava["average_heartrate"].notnull().any():
                 st.write("### ❤️ Heart Rate from Strava")
-                fig, ax = plt.subplots()
+                fig, ax = plt.subplots(figsize=(10, 4))
                 ax.plot(df_strava["start_date_local"], df_strava["average_heartrate"], marker="o", color="green")
                 ax.set_title("Heart Rate from Strava")
                 ax.set_ylabel("bpm")
                 ax.set_xlabel("Date")
-                ax.xaxis.set_major_formatter(mdates.DateFormatter("%Y-%m-%d"))
+                ax.xaxis.set_major_formatter(mdates.DateFormatter("%b %d"))
                 fig.autofmt_xdate()
                 st.pyplot(fig)
         else:
             st.error("❌ No activity data retrieved from Strava.")
 
     # ==========================
-    # 🍎 APPLE HEALTH JSON (from UNIX timestamps)
+    # 🍎 APPLE HEALTH JSON (UNIX timestamps)
     # ==========================
     st.markdown("## 🍎 Apple Health Data")
-    st.markdown("✅ JSON data with UNIX timestamp format")
+    st.markdown("✅ JSON with Unix timestamps")
 
     df_health = pd.DataFrame()
 
     try:
         df_health = pd.read_json("apple_health.json")
 
-        # ✅ Convert Unix timestamp in milliseconds to datetime
+        # Fix timestamp
         df_health["start_date"] = pd.to_datetime(df_health["start_date"], unit="ms", utc=True)
         df_health = df_health[df_health["start_date"].notnull()]
-
         df_health["value"] = pd.to_numeric(df_health["value"], errors="coerce")
 
         st.success("✅ Apple Health data loaded.")
@@ -449,15 +448,21 @@ def real_time_monitoring_interface():
         st.dataframe(df_health.sort_values("start_date", ascending=False))
 
         for metric in df_health["type"].unique():
-            metric_df = df_health[df_health["type"] == metric]
+            metric_df = df_health[df_health["type"] == metric].copy()
+
+            # Smooth and downsample
+            metric_df = metric_df.sort_values("start_date")
+            metric_df["value_smoothed"] = metric_df["value"].rolling(window=5, min_periods=1).mean()
+            metric_df = metric_df.iloc[::5]  # downsample to reduce clutter
+
             if not metric_df.empty:
                 st.write(f"### 📈 {metric} Over Time")
-                fig, ax = plt.subplots()
-                ax.plot(metric_df["start_date"], metric_df["value"], marker="o", linestyle="-")
+                fig, ax = plt.subplots(figsize=(10, 4))
+                ax.plot(metric_df["start_date"], metric_df["value_smoothed"], marker="o", linestyle="-", markersize=3)
                 ax.set_title(f"{metric} Trends")
-                ax.set_ylabel(metric_df['unit'].iloc[0])
+                ax.set_ylabel(metric_df["unit"].iloc[0])
                 ax.set_xlabel("Date")
-                ax.xaxis.set_major_formatter(mdates.DateFormatter("%Y-%m-%d"))
+                ax.xaxis.set_major_formatter(mdates.DateFormatter("%b %d"))
                 fig.autofmt_xdate()
                 st.pyplot(fig)
 
